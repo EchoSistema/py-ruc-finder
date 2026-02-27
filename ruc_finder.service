@@ -1,0 +1,28 @@
+[Unit]
+Description=RUC Finder - DNIT Paraguay API
+After=network.target postgresql.service
+Wants=postgresql.service
+
+[Service]
+Type=simple
+User=ruc_finder
+Group=ruc_finder
+ExecStart=/usr/local/bin/ruc_finder --config /etc/ruc_finder/ruc_finder.conf
+Restart=on-failure
+RestartSec=5
+
+# Security hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadOnlyPaths=/etc/ruc_finder
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=ruc_finder
+Environment=RUST_LOG=info
+
+[Install]
+WantedBy=multi-user.target

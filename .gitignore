@@ -1,0 +1,12 @@
+# Build
+/target
+
+# Environment
+.env
+
+# IDE
+.idea/
+
+# Data (downloaded/generated)
+input/
+output/
