@@ -118,6 +118,11 @@ async fn main() {
             .service(
                 SwaggerUi::new("/swagger-ui/{_:.*}").url("/api-docs/openapi.json", openapi.clone()),
             )
+            .route("/swagger-ui", web::get().to(|| async {
+                actix_web::HttpResponse::MovedPermanently()
+                    .append_header(("Location", "/swagger-ui/"))
+                    .finish()
+            }))
             .route("/api/v1/health", web::get().to(handlers::health_check))
             .route(
                 "/api/v1/ruc/search",
