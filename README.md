@@ -19,7 +19,7 @@ src/
 
 ## Prerequisites
 
-- Rust 1.85+
+- Rust 1.88+
 - PostgreSQL (only required for API/DB mode; offline mode does not need a database)
 
 ## Configuration
