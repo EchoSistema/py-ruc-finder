@@ -2,6 +2,11 @@
 
 Rust application that scrapes RUC files from DNIT Paraguay, stores them in PostgreSQL, and exposes a REST API with Actix Web. Also supports offline mode, exporting data to CSV, JSON, Parquet, or NEON.
 
+- **Live API**: [ruc.micros.services](https://ruc.micros.services)
+- **Swagger UI**: [ruc.micros.services/swagger-ui/](https://ruc.micros.services/swagger-ui/)
+- **OpenAPI spec**: [ruc.micros.services/api-docs/openapi.json](https://ruc.micros.services/api-docs/openapi.json)
+- **Docker Hub**: [echosistema/ruc-finder](https://hub.docker.com/r/echosistema/ruc-finder)
+
 ## Architecture
 
 ```

@@ -13,6 +13,12 @@ jobs:
   docker:
     runs-on: ubuntu-latest
 
+    outputs:
+      version: ${{ steps.info.outputs.version }}
+      tag: ${{ steps.info.outputs.tag }}
+      commit_sha: ${{ steps.info.outputs.commit_sha }}
+      author: ${{ steps.info.outputs.author }}
+
     steps:
       - uses: actions/checkout@v4
         with:
@@ -27,7 +33,6 @@ jobs:
           COMMIT_SHA="${GITHUB_SHA::7}"
           COMMIT_MSG=$(git log -1 --pretty=%s)
           AUTHOR="${GITHUB_ACTOR}"
-          TIMESTAMP=$(date -u '+%Y-%m-%d %H:%M:%S UTC')
           PREV_TAG=$(git describe --tags --abbrev=0 "${TAG}^" 2>/dev/null || echo "")
           if [ -n "$PREV_TAG" ]; then
             CHANGELOG=$(git log --pretty=format:'• %s' "${PREV_TAG}..${TAG}" | head -20)
@@ -41,7 +46,6 @@ jobs:
           echo "commit_sha=$COMMIT_SHA" >> "$GITHUB_OUTPUT"
           echo "commit_msg=$COMMIT_MSG" >> "$GITHUB_OUTPUT"
           echo "author=$AUTHOR" >> "$GITHUB_OUTPUT"
-          echo "timestamp=$TIMESTAMP" >> "$GITHUB_OUTPUT"
 
           EOF=$(dd if=/dev/urandom bs=15 count=1 status=none | base64)
           echo "changelog<<$EOF" >> "$GITHUB_OUTPUT"
@@ -55,13 +59,13 @@ jobs:
             exit 1
           fi
 
-      - name: Notify Discord — deploy started
+      - name: Notify Discord — build started
         run: |
           curl -s -H "Content-Type: application/json" -d '{
             "username": "${{ env.DISCORD_USERNAME }}",
             "avatar_url": "${{ env.DISCORD_AVATAR }}",
             "embeds": [{
-              "title": "🚀 Deploy Iniciado — ruc-finder",
+              "title": "🚀 Build Iniciado — ruc-finder",
               "color": 16761095,
               "fields": [
                 { "name": "Versão", "value": "`${{ steps.info.outputs.tag }}`", "inline": true },
@@ -100,7 +104,7 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      - name: Notify Discord — deploy succeeded
+      - name: Notify Discord — build succeeded
         if: success()
         run: |
           TAGS=$(echo '${{ steps.meta.outputs.tags }}' | tr '\n' ', ' | sed 's/,$//')
@@ -109,7 +113,7 @@ jobs:
             "username": "${{ env.DISCORD_USERNAME }}",
             "avatar_url": "${{ env.DISCORD_AVATAR }}",
             "embeds": [{
-              "title": "✅ Deploy Concluído — ruc-finder",
+              "title": "✅ Imagem Publicada — ruc-finder",
               "color": 3066993,
               "fields": [
                 { "name": "Versão", "value": "`${{ steps.info.outputs.tag }}`", "inline": true },
@@ -123,14 +127,14 @@ jobs:
             }]
           }' "${{ secrets.DISCORD_DEPLOY_CHANNEL }}"
 
-      - name: Notify Discord — deploy failed
+      - name: Notify Discord — build failed
         if: failure()
         run: |
           curl -s -H "Content-Type: application/json" -d '{
             "username": "${{ env.DISCORD_USERNAME }}",
             "avatar_url": "${{ env.DISCORD_AVATAR }}",
             "embeds": [{
-              "title": "❌ Deploy Falhou — ruc-finder",
+              "title": "❌ Build Falhou — ruc-finder",
               "color": 15158332,
               "fields": [
                 { "name": "Versão", "value": "`${{ steps.info.outputs.tag }}`", "inline": true },

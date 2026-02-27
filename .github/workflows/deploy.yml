@@ -1,0 +1,119 @@
+name: Deploy to Production
+
+on:
+  # Triggered automatically after docker-publish succeeds
+  workflow_run:
+    workflows: ["Build and Push to DockerHub"]
+    types: [completed]
+
+  # Manual trigger (redeploy without rebuild)
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Docker image tag to deploy (e.g., 0.1.0 or latest)"
+        required: true
+        default: "latest"
+
+env:
+  DISCORD_USERNAME: "Paraguay - Ruc Finder"
+  DISCORD_AVATAR: "https://flagcdn.com/w320/py.png"
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    # Only run if docker-publish succeeded, or if manually triggered
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success')
+
+    steps:
+      - name: Determine deploy tag
+        id: tag
+        run: |
+          if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
+            echo "version=${{ inputs.tag }}" >> "$GITHUB_OUTPUT"
+            echo "trigger=manual" >> "$GITHUB_OUTPUT"
+          else
+            # Extract version from the tag that triggered docker-publish
+            RAW_TAG="${{ github.event.workflow_run.head_branch }}"
+            VERSION="${RAW_TAG#v}"
+            echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+            echo "trigger=auto" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Notify Discord — deploy triggered
+        run: |
+          curl -s -H "Content-Type: application/json" -d '{
+            "username": "${{ env.DISCORD_USERNAME }}",
+            "avatar_url": "${{ env.DISCORD_AVATAR }}",
+            "embeds": [{
+              "title": "⚙️ Deploy Triggered — ruc-finder",
+              "color": 3447003,
+              "fields": [
+                { "name": "Tag", "value": "`${{ steps.tag.outputs.version }}`", "inline": true },
+                { "name": "Trigger", "value": "`${{ steps.tag.outputs.trigger }}`", "inline": true },
+                { "name": "Domain", "value": "[Swagger UI](https://ruc.micros.services/swagger-ui/)", "inline": true },
+                { "name": "DockerHub", "value": "[echosistema/ruc-finder](https://hub.docker.com/r/echosistema/ruc-finder)", "inline": false }
+              ],
+              "timestamp": "'$(date -u +%Y-%m-%dT%H:%M:%SZ)'"
+            }]
+          }' "${{ secrets.DISCORD_DEPLOY_CHANNEL }}"
+
+      - name: Trigger Semaphore deploy
+        run: |
+          RESPONSE=$(curl -s -w "\n%{http_code}" -X POST \
+            "${{ vars.SEMAPHORE_URL }}/api/project/${{ vars.SEMAPHORE_PROJECT_ID }}/tasks" \
+            -H "Authorization: Bearer ${{ secrets.SEMAPHORE_API_TOKEN }}" \
+            -H "Content-Type: application/json" \
+            -d '{
+              "template_id": ${{ vars.SEMAPHORE_TEMPLATE_ID }},
+              "debug": false,
+              "cli": "-e ruc_finder_tag=${{ steps.tag.outputs.version }} -e ci_run_url=${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+            }')
+          HTTP_CODE=$(echo "$RESPONSE" | tail -1)
+          BODY=$(echo "$RESPONSE" | head -n -1)
+          echo "Semaphore response: $HTTP_CODE"
+          echo "$BODY" | jq . 2>/dev/null || echo "$BODY"
+          if [ "$HTTP_CODE" -lt 200 ] || [ "$HTTP_CODE" -ge 300 ]; then
+            echo "::error::Semaphore trigger failed with HTTP $HTTP_CODE"
+            exit 1
+          fi
+
+      - name: Notify Discord — Semaphore started
+        if: success()
+        run: |
+          curl -s -H "Content-Type: application/json" -d '{
+            "username": "${{ env.DISCORD_USERNAME }}",
+            "avatar_url": "${{ env.DISCORD_AVATAR }}",
+            "embeds": [{
+              "title": "🚀 Semaphore Deploy Iniciado — ruc-finder",
+              "color": 3066993,
+              "fields": [
+                { "name": "Tag", "value": "`${{ steps.tag.outputs.version }}`", "inline": true },
+                { "name": "Trigger", "value": "`${{ steps.tag.outputs.trigger }}`", "inline": true },
+                { "name": "Semaphore", "value": "[Ver no Semaphore](${{ vars.SEMAPHORE_URL }}/project/${{ vars.SEMAPHORE_PROJECT_ID }}/templates/${{ vars.SEMAPHORE_TEMPLATE_ID }})", "inline": false },
+                { "name": "DockerHub", "value": "[echosistema/ruc-finder](https://hub.docker.com/r/echosistema/ruc-finder)", "inline": false },
+                { "name": "Domain", "value": "[Swagger UI](https://ruc.micros.services/swagger-ui/)", "inline": false }
+              ],
+              "timestamp": "'$(date -u +%Y-%m-%dT%H:%M:%SZ)'"
+            }]
+          }' "${{ secrets.DISCORD_DEPLOY_CHANNEL }}"
+
+      - name: Notify Discord — trigger failed
+        if: failure()
+        run: |
+          curl -s -H "Content-Type: application/json" -d '{
+            "username": "${{ env.DISCORD_USERNAME }}",
+            "avatar_url": "${{ env.DISCORD_AVATAR }}",
+            "embeds": [{
+              "title": "❌ Semaphore Trigger Falhou — ruc-finder",
+              "color": 15158332,
+              "fields": [
+                { "name": "Tag", "value": "`${{ steps.tag.outputs.version }}`", "inline": true },
+                { "name": "Trigger", "value": "`${{ steps.tag.outputs.trigger }}`", "inline": true },
+                { "name": "Logs", "value": "[Ver no GitHub Actions](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})", "inline": false },
+                { "name": "DockerHub", "value": "[echosistema/ruc-finder](https://hub.docker.com/r/echosistema/ruc-finder)", "inline": false }
+              ],
+              "timestamp": "'$(date -u +%Y-%m-%dT%H:%M:%SZ)'"
+            }]
+          }' "${{ secrets.DISCORD_DEPLOY_CHANNEL }}"
