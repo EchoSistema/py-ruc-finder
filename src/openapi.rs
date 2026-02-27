@@ -11,7 +11,7 @@ use crate::models;
         description = "REST API for querying RUC (Registro Unico de Contribuyentes) data from DNIT Paraguay.\n\nData is scraped from the official DNIT website, parsed from ZIP/TXT files, and stored in PostgreSQL. The API supports exact lookup, filtered search with pagination, and fuzzy (trigram similarity) search.\n\n**Data source:** [DNIT Paraguay — Listado de RUC con sus equivalencias](https://www.dnit.gov.py/web/portal-institucional/listado-de-ruc-con-sus-equivalencias)",
         version = "0.1.1",
         contact(name = "GitHub Repository", url = "https://github.com/EchoSistema/py-ruc-finder"),
-        license(name = "MIT")
+        license(name = "MIT", identifier = "MIT")
     ),
     tags(
         (name = "RUC", description = "Endpoints for querying and searching RUC (tax ID) records. Supports exact lookup by number, filtered search with pagination, and fuzzy name matching via pg_trgm."),
