@@ -20,7 +20,8 @@ struct RucFile {
 }
 
 /// Sync to database.
-pub async fn run_sync_db(pool: &PgPool, config: &AppConfig) {
+/// When `force` is true, skips the reference-date and per-file hash checks.
+pub async fn run_sync_db(pool: &PgPool, config: &AppConfig, force: bool) {
     info!("Fetching page: {}...", config.sync_page_url);
     let html = match fetch_page(&config.sync_page_url).await {
         Ok(h) => h,
@@ -51,11 +52,15 @@ pub async fn run_sync_db(pool: &PgPool, config: &AppConfig) {
     };
 
     if let Some(last) = last_date {
-        if last == site_date {
+        if last == site_date && !force {
             info!("Data is already up to date (reference date: {last}). Skipping sync.");
             return;
         }
-        info!("New data available: DB has {last}, site has {site_date}. Starting import...");
+        if last == site_date && force {
+            info!("Data is up to date (reference date: {last}), but force mode enabled. Continuing...");
+        } else {
+            info!("New data available: DB has {last}, site has {site_date}. Starting import...");
+        }
     } else {
         info!("No previous data in DB. Starting first import...");
     }
@@ -83,9 +88,15 @@ pub async fn run_sync_db(pool: &PgPool, config: &AppConfig) {
             .unwrap_or(None);
 
         if let Some(stored) = last_hash {
-            if stored == current_hash {
+            if stored == current_hash && !force {
                 info!("{}: unchanged (hash match). Skipping.", ruc_file.file_name);
                 continue;
+            }
+            if stored == current_hash && force {
+                info!(
+                    "{}: unchanged (hash match), but force mode enabled. Processing...",
+                    ruc_file.file_name
+                );
             }
             info!(
                 "{}: file changed (hash mismatch). Processing...",
@@ -148,7 +159,8 @@ pub async fn run_sync_db(pool: &PgPool, config: &AppConfig) {
 }
 
 /// Sync to file (no database needed).
-pub async fn run_sync_file(format: ExportFormat, output_dir: &str, config: &AppConfig) {
+/// When `force` is true, skips the sentinel-file check.
+pub async fn run_sync_file(format: ExportFormat, output_dir: &str, config: &AppConfig, force: bool) {
     info!("Fetching page: {}...", config.sync_page_url);
     let html = match fetch_page(&config.sync_page_url).await {
         Ok(h) => h,
@@ -176,12 +188,18 @@ pub async fn run_sync_file(format: ExportFormat, output_dir: &str, config: &AppC
     }
 
     let sentinel = dir.join(format!("ruc_{}.{}", site_date, format.extension()));
-    if sentinel.exists() {
+    if sentinel.exists() && !force {
         info!(
             "Data is already up to date (file {} exists). Skipping sync.",
             sentinel.display()
         );
         return;
+    }
+    if sentinel.exists() && force {
+        info!(
+            "File {} already exists, but force mode enabled. Continuing...",
+            sentinel.display()
+        );
     }
 
     let files = discover_zip_urls(&html, &config.sync_page_url);

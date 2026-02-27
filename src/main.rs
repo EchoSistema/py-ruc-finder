@@ -1,12 +1,3 @@
-mod config;
-mod db;
-mod errors;
-mod exporter;
-mod handlers;
-mod models;
-mod repository;
-mod scraper;
-
 use std::sync::Arc;
 
 use actix_web::{App, HttpServer, web};
@@ -15,35 +6,12 @@ use log::info;
 use utoipa::OpenApi;
 use utoipa_swagger_ui::SwaggerUi;
 
-use crate::exporter::ExportFormat;
-
-#[derive(OpenApi)]
-#[openapi(
-    info(
-        title = "RUC Finder API",
-        description = "REST API for querying RUC (Registro Unico de Contribuyentes) data from DNIT Paraguay.\n\nData is scraped from the official DNIT website, parsed from ZIP/TXT files, and stored in PostgreSQL. The API supports exact lookup, filtered search with pagination, and fuzzy (trigram similarity) search.\n\n**Data source:** [DNIT Paraguay — Listado de RUC con sus equivalencias](https://www.dnit.gov.py/web/portal-institucional/listado-de-ruc-con-sus-equivalencias)",
-        version = "0.1.0",
-        contact(name = "GitHub Repository", url = "https://github.com/EchoSistema/py-ruc-finder"),
-        license(name = "MIT")
-    ),
-    tags(
-        (name = "RUC", description = "Endpoints for querying and searching RUC (tax ID) records. Supports exact lookup by number, filtered search with pagination, and fuzzy name matching via pg_trgm."),
-        (name = "System", description = "Operational endpoints for health checks and data synchronization.")
-    ),
-    paths(
-        handlers::health_check,
-        handlers::get_ruc_by_number,
-        handlers::search_ruc,
-        handlers::fuzzy_search_ruc,
-        handlers::trigger_sync,
-    ),
-    components(schemas(
-        models::Ruc,
-        models::RucWithScore,
-        errors::ErrorResponse,
-    ))
-)]
-struct ApiDoc;
+use ruc_finder::config;
+use ruc_finder::db;
+use ruc_finder::exporter::ExportFormat;
+use ruc_finder::handlers;
+use ruc_finder::openapi::ApiDoc;
+use ruc_finder::scraper;
 
 #[derive(Parser)]
 #[command(name = "ruc_finder", about = "RUC Finder - DNIT Paraguay")]
@@ -51,6 +19,10 @@ struct Cli {
     /// Run the scraper sync and exit
     #[arg(long)]
     sync: bool,
+
+    /// Force sync: bypass date, hash, and interval checks
+    #[arg(long)]
+    force: bool,
 
     /// Export format when no database is configured: csv, json, neon, parquet
     #[arg(long)]
@@ -104,9 +76,13 @@ async fn main() {
 
     if cli.sync {
         if config.has_database() && cli.format.is_none() {
-            info!("Running sync to database...");
+            if cli.force {
+                info!("Running FORCED sync to database...");
+            } else {
+                info!("Running sync to database...");
+            }
             let pool = db::create_pool(&config).await;
-            scraper::run_sync_db(&pool, &config).await;
+            scraper::run_sync_db(&pool, &config, cli.force).await;
         } else {
             let format_str = cli.format.as_deref().unwrap_or("json");
             let format = ExportFormat::from_str(format_str).unwrap_or_else(|| {
@@ -118,7 +94,7 @@ async fn main() {
             });
             info!("Running sync to file ({format_str})...");
             let output_dir = cli.output.as_deref().unwrap_or(&config.output_dir);
-            scraper::run_sync_file(format, output_dir, &config).await;
+            scraper::run_sync_file(format, output_dir, &config, cli.force).await;
         }
         return;
     }

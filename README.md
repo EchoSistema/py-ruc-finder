@@ -12,6 +12,7 @@ Rust application that scrapes RUC files from DNIT Paraguay, stores them in Postg
 ```
 src/
 ├── main.rs          # Entrypoint: CLI (clap) + Actix Web server
+├── lib.rs           # Library crate: re-exports modules for integration tests
 ├── config.rs        # Config loading (file + env vars + defaults)
 ├── db.rs            # PostgreSQL connection pool (sqlx)
 ├── models.rs        # Entities, DTOs, parsing structs
@@ -20,6 +21,13 @@ src/
 ├── exporter.rs      # Export to CSV, JSON, NEON, and Parquet
 ├── handlers.rs      # REST endpoint handlers
 └── errors.rs        # Unified error type (AppError)
+tests/
+├── api_test.rs      # HTTP handler integration tests (requires DB)
+├── cli_test.rs      # Binary CLI flag and behavior tests
+├── config_test.rs   # CidrNetwork parsing, config defaults, TOML loading
+├── errors_test.rs   # AppError formatting, status codes, JSON body
+├── exporter_test.rs # File export roundtrip (CSV, JSON, Neon, Parquet)
+└── models_test.rs   # DTO serialization and deserialization
 ```
 
 ## Prerequisites
@@ -97,6 +105,19 @@ cargo build --release
 
 ## Usage
 
+### CLI parameters
+
+| Parameter           | Description                                                    |
+|---------------------|----------------------------------------------------------------|
+| `-c`, `--config`    | Path to config file (default: `/etc/ruc_finder/ruc_finder.conf`) |
+| `--sync`            | Run the scraper and exit (no API server)                       |
+| `--force`           | Bypass date, hash, and interval checks (use with `--sync` or HTTP) |
+| `--format`          | Export format: `csv`, `json`, `neon`, `parquet`                |
+| `--output`          | Output directory for file exports (default: `./output`)        |
+| `--host`            | Host/IP to bind the server                                     |
+| `--port`            | Port to bind the server                                        |
+| `--backfill-hashes` | Download files and backfill `file_hash`                        |
+
 ### 1. API server
 
 Start the Actix Web API server. Requires `database.url` to be configured.
@@ -109,15 +130,33 @@ Start the Actix Web API server. Requires `database.url` to be configured.
 ./ruc_finder --config ./ruc_finder.conf --host 127.0.0.1 --port 8080
 ```
 
-### 2. Export to file (offline mode)
+### 2. Sync to database
+
+Scrape data and upsert into PostgreSQL, then exit.
+
+```bash
+# Normal sync (skips if data is up to date)
+./ruc_finder --config ./ruc_finder.conf --sync
+
+# Forced sync (bypasses date and hash checks, re-imports everything)
+./ruc_finder --config ./ruc_finder.conf --sync --force
+```
+
+### 3. Export to file (offline mode)
 
 Scrape DNIT data and export directly to a file, **no database required**.
 
 ```bash
+# Normal (skips if output file already exists for this date)
 ./ruc_finder --sync --format csv
 ./ruc_finder --sync --format json
 ./ruc_finder --sync --format parquet
 ./ruc_finder --sync --format neon
+
+# Forced (re-exports even if the file already exists)
+./ruc_finder --sync --force --format csv
+
+# Custom output directory
 ./ruc_finder --sync --format csv --output /tmp/ruc_data
 ```
 
@@ -128,14 +167,6 @@ Scrape DNIT data and export directly to a file, **no database required**.
 | `parquet` | Apache Parquet columnar format. Ideal for Spark, DuckDB, pandas.            |
 | `neon`    | [NEON](https://github.com/EwertonDaniel/neon-neural-efficient-object-notation) strict mode. Optimized for LLMs. |
 
-### 3. Sync to database
-
-Scrape data and upsert into PostgreSQL, then exit.
-
-```bash
-./ruc_finder --config ./ruc_finder.conf --sync
-```
-
 ### 4. Backfill file hashes
 
 Download files from DB metadata and compute missing hashes.
@@ -144,26 +175,23 @@ Download files from DB metadata and compute missing hashes.
 ./ruc_finder --config ./ruc_finder.conf --backfill-hashes
 ```
 
-### CLI parameters
+### Freshness checks and `--force`
 
-| Parameter           | Description                                           |
-|---------------------|-------------------------------------------------------|
-| `-c`, `--config`    | Path to config file (default: `/etc/ruc_finder/ruc_finder.conf`) |
-| `--sync`            | Run the scraper and exit (no API server)              |
-| `--format`          | Export format: `csv`, `json`, `neon`, `parquet`       |
-| `--output`          | Output directory for file exports (default: `./output`) |
-| `--host`            | Host/IP to bind the server                            |
-| `--port`            | Port to bind the server                               |
-| `--backfill-hashes` | Download files and backfill `file_hash`               |
-
-### Freshness check
-
-The scraper always checks for new data before importing:
+By default, the scraper checks for new data before importing:
 
 1. Extracts the reference date from the DNIT page ("Actualizado al ...")
-2. **DB mode**: compares with the latest `reference_date` in `ruc_file_metadata`
-3. **File mode**: checks if a file with that date already exists
+2. **DB mode**: compares with the latest `reference_date` in `ruc_file_metadata`, then checks each file's hash
+3. **File mode**: checks if a file with that date already exists (sentinel file)
 4. Skips import if data is already up to date
+
+The `--force` flag bypasses **all** of these checks:
+
+| Check                  | Normal behavior      | With `--force`              |
+|------------------------|----------------------|-----------------------------|
+| Reference date (DB)    | Skip if same as site | Process anyway              |
+| File hash (DB)         | Skip unchanged files | Re-download and re-import   |
+| Sentinel file (export) | Skip if exists       | Re-export and overwrite     |
+| HTTP rate limit        | 429 if too recent    | Bypass interval restriction |
 
 ---
 
@@ -191,6 +219,12 @@ docker run --rm \
   -e DATABASE_URL="postgres://..." \
   -e RUST_LOG=info \
   echosistema/ruc-finder:latest --sync
+
+# Forced sync to database (bypass all checks)
+docker run --rm \
+  -e DATABASE_URL="postgres://..." \
+  -e RUST_LOG=info \
+  echosistema/ruc-finder:latest --sync --force
 
 # Backfill hashes
 docker run --rm \
@@ -286,6 +320,38 @@ sudo systemctl list-timers ruc_finder_sync.timer
 
 ---
 
+## Testing
+
+### Run all tests
+
+```bash
+cargo test
+```
+
+### API integration tests
+
+API tests require a PostgreSQL connection. Create a `.env.test` file:
+
+```bash
+DATABASE_URL=postgresql://user:password@localhost:5432/paraguay?sslmode=require
+RUST_LOG=info
+```
+
+If `.env.test` is missing or the database is unreachable, API tests skip automatically with a warning.
+
+### Test structure
+
+| File                   | Tests | Requires DB | What it covers                                |
+|------------------------|-------|-------------|-----------------------------------------------|
+| `tests/config_test.rs` | 14    | No          | CIDR parsing, config defaults, TOML loading   |
+| `tests/errors_test.rs` | 11    | No          | AppError Display, HTTP codes, JSON body       |
+| `tests/exporter_test.rs` | 13  | No          | CSV/JSON/Neon/Parquet export roundtrip        |
+| `tests/models_test.rs` | 10    | No          | DTO serialization, SyncParams, search params  |
+| `tests/cli_test.rs`   | 7     | No          | CLI flags, --force, error exits               |
+| `tests/api_test.rs`   | 7     | Yes         | Health, search, fuzzy, sync, sync force       |
+
+---
+
 ## API Reference
 
 Interactive API documentation is available via **Swagger UI** at:
@@ -307,10 +373,11 @@ curl http://localhost:3000/api/v1/health
 
 ### `GET /api/v1/ruc/{number}`
 
-Look up a RUC by its exact number.
+Look up a RUC by its exact number. Optionally include the check digit with a hyphen.
 
 ```bash
 curl http://localhost:3000/api/v1/ruc/1000000
+curl http://localhost:3000/api/v1/ruc/1000000-3
 ```
 
 ### `GET /api/v1/ruc`
@@ -378,10 +445,22 @@ curl "http://localhost:3000/api/v1/ruc/search?query=JUAN CARLOS LOPES&status=ACT
 
 ### `POST /api/v1/sync`
 
-Triggers the scraper in the background. **Restricted by network** — only requests from IPs within `sync.allowed_networks` are accepted (returns `403 Forbidden` otherwise). Configure via the config file or `SYNC_ALLOWED_NETWORKS` env var (comma-separated CIDRs).
+Triggers the scraper in the background. Returns `202 Accepted` immediately.
+
+| Query param | Description                                              |
+|-------------|----------------------------------------------------------|
+| `force`     | `true` to bypass rate limit and date/hash checks         |
+
+**Access control:** restricted to IPs within `sync.allowed_networks`. Returns `403 Forbidden` if the caller is outside the allowed range. Network restriction is **not** bypassed by `force`.
+
+**Rate limit:** enforces `sync.interval_hours` (default: 24h). Returns `429 Too Many Requests` if a sync was performed recently. Bypassed when `force=true`.
 
 ```bash
+# Normal sync (respects rate limit and freshness checks)
 curl -X POST http://localhost:3000/api/v1/sync
+
+# Forced sync (bypasses rate limit and freshness checks)
+curl -X POST "http://localhost:3000/api/v1/sync?force=true"
 ```
 
 ---
@@ -418,6 +497,8 @@ Requests from IPs outside the allowed networks receive `403 Forbidden`:
 ```json
 {"error": "Sync endpoint is restricted to the internal network"}
 ```
+
+**Note:** the `force` query parameter bypasses the rate limit and data freshness checks, but it does **not** bypass network restrictions.
 
 ---
 
