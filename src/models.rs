@@ -194,6 +194,13 @@ pub struct RucWithScore {
     pub score: f32,
 }
 
+/// Query parameters for the sync endpoint.
+#[derive(Debug, Deserialize)]
+pub struct SyncParams {
+    /// When true, bypasses interval and date/hash checks.
+    pub force: Option<bool>,
+}
+
 /// Lightweight row for backfilling file hashes.
 #[derive(Debug, FromRow)]
 pub struct FileMetadataRow {

@@ -6,7 +6,7 @@ use sqlx::PgPool;
 
 use crate::config::AppConfig;
 use crate::errors::{AppError, ErrorResponse};
-use crate::models::{FuzzySearchParams, PaginatedResponse, Ruc, RucSearchParams, RucWithScore};
+use crate::models::{FuzzySearchParams, PaginatedResponse, Ruc, RucSearchParams, RucWithScore, SyncParams};
 use crate::repository;
 use crate::scraper;
 
@@ -247,7 +247,10 @@ pub async fn health_check(pool: web::Data<PgPool>) -> Result<HttpResponse, AppEr
     path = "/api/v1/sync",
     tag = "System",
     summary = "Trigger data sync from DNIT",
-    description = "Starts a background scraper task that downloads RUC ZIP files from DNIT Paraguay, parses the contents, and upserts records into the database. Returns immediately with 202 Accepted.\n\n**Access control:** restricted to IPs within the CIDR networks configured in `sync.allowed_networks` (e.g. `10.10.0.0/20`). Returns 403 if the caller's IP is outside the allowed range. If no networks are configured, the endpoint is open to all.\n\n**Rate limit:** respects `sync.interval_hours`. If a sync was performed recently, returns 429 Too Many Requests.",
+    description = "Starts a background scraper task that downloads RUC ZIP files from DNIT Paraguay, parses the contents, and upserts records into the database. Returns immediately with 202 Accepted.\n\n**Access control:** restricted to IPs within the CIDR networks configured in `sync.allowed_networks` (e.g. `10.10.0.0/20`). Returns 403 if the caller's IP is outside the allowed range. If no networks are configured, the endpoint is open to all.\n\n**Rate limit:** respects `sync.interval_hours`. If a sync was performed recently, returns 429 Too Many Requests.\n\n**Force mode:** append `?force=true` to bypass the rate limit and the reference-date/hash checks inside the scraper.",
+    params(
+        ("force" = Option<bool>, Query, description = "Bypass interval and date/hash checks")
+    ),
     responses(
         (status = 202, description = "Sync started successfully in background", body = serde_json::Value,
             example = json!({"message": "Sync started in background"})
@@ -265,7 +268,10 @@ pub async fn trigger_sync(
     req: HttpRequest,
     pool: web::Data<PgPool>,
     config: web::Data<Arc<AppConfig>>,
+    query: web::Query<SyncParams>,
 ) -> Result<HttpResponse, AppError> {
+    let force = query.force.unwrap_or(false);
+
     // Network restriction: check caller IP against allowed CIDRs
     if !config.sync_allowed_networks.is_empty() {
         let peer = req.peer_addr().ok_or_else(|| {
@@ -278,25 +284,33 @@ pub async fn trigger_sync(
         }
     }
 
-    // Rate limit: enforce sync_interval_hours
-    if let Some(last_sync) = repository::get_last_sync_time(pool.get_ref()).await? {
-        let hours_since = (Utc::now() - last_sync).num_hours();
-        if hours_since < config.sync_interval_hours as i64 {
-            return Ok(HttpResponse::TooManyRequests().json(serde_json::json!({
-                "error": format!(
-                    "Last sync was {}h ago. Minimum interval is {}h.",
-                    hours_since, config.sync_interval_hours
-                )
-            })));
+    // Rate limit: enforce sync_interval_hours (skipped when force=true)
+    if !force {
+        if let Some(last_sync) = repository::get_last_sync_time(pool.get_ref()).await? {
+            let hours_since = (Utc::now() - last_sync).num_hours();
+            if hours_since < config.sync_interval_hours as i64 {
+                return Ok(HttpResponse::TooManyRequests().json(serde_json::json!({
+                    "error": format!(
+                        "Last sync was {}h ago. Minimum interval is {}h.",
+                        hours_since, config.sync_interval_hours
+                    )
+                })));
+            }
         }
     }
 
     let pool_clone = pool.get_ref().clone();
     let config_clone = config.into_inner();
     tokio::spawn(async move {
-        scraper::run_sync_db(&pool_clone, &config_clone).await;
+        scraper::run_sync_db(&pool_clone, &config_clone, force).await;
     });
+
+    let message = if force {
+        "Forced sync started in background"
+    } else {
+        "Sync started in background"
+    };
     Ok(HttpResponse::Accepted().json(serde_json::json!({
-        "message": "Sync started in background"
+        "message": message
     })))
 }
