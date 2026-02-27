@@ -15,7 +15,7 @@ src/
 ├── lib.rs           # Library crate: re-exports modules for integration tests
 ├── config.rs        # Config loading (file + env vars + defaults)
 ├── db.rs            # PostgreSQL connection pool (sqlx)
-├── models.rs        # Entities, DTOs, parsing structs
+├── models.rs        # Entities, DTOs, check digit functions
 ├── repository.rs    # SQL queries (dynamic search with ILIKE)
 ├── scraper.rs       # ZIP download, in-memory extraction, parsing, upsert/export
 ├── exporter.rs      # Export to CSV, JSON, NEON, and Parquet
@@ -27,7 +27,9 @@ tests/
 ├── config_test.rs   # CidrNetwork parsing, config defaults, TOML loading
 ├── errors_test.rs   # AppError formatting, status codes, JSON body
 ├── exporter_test.rs # File export roundtrip (CSV, JSON, Neon, Parquet)
-└── models_test.rs   # DTO serialization and deserialization
+├── models_test.rs   # DTOs, check digit computation, RUC validation
+├── check_digit_test.rs # Handler tests for /dv and /validate endpoints
+└── data/            # Anonymized Star Wars test datasets (ruc0-2.zip/txt)
 ```
 
 ## Prerequisites
@@ -341,14 +343,15 @@ If `.env.test` is missing or the database is unreachable, API tests skip automat
 
 ### Test structure
 
-| File                   | Tests | Requires DB | What it covers                                |
-|------------------------|-------|-------------|-----------------------------------------------|
-| `tests/config_test.rs` | 14    | No          | CIDR parsing, config defaults, TOML loading   |
-| `tests/errors_test.rs` | 11    | No          | AppError Display, HTTP codes, JSON body       |
-| `tests/exporter_test.rs` | 13  | No          | CSV/JSON/Neon/Parquet export roundtrip        |
-| `tests/models_test.rs` | 10    | No          | DTO serialization, SyncParams, search params  |
-| `tests/cli_test.rs`   | 7     | No          | CLI flags, --force, error exits               |
-| `tests/api_test.rs`   | 7     | Yes         | Health, search, fuzzy, sync, sync force       |
+| File                        | Tests | Requires DB | What it covers                                     |
+|-----------------------------|-------|-------------|----------------------------------------------------|
+| `tests/config_test.rs`      | 14    | No          | CIDR parsing, config defaults, TOML loading        |
+| `tests/errors_test.rs`      | 13    | No          | AppError Display, HTTP codes, JSON body            |
+| `tests/exporter_test.rs`    | 13    | No          | CSV/JSON/Neon/Parquet export roundtrip             |
+| `tests/models_test.rs`      | 29    | No          | DTOs, check digit (Módulo 11), RUC validation      |
+| `tests/check_digit_test.rs` | 14    | No          | Handler tests: /dv and /validate (both formats)    |
+| `tests/cli_test.rs`         | 7     | No          | CLI flags, --force, error exits                    |
+| `tests/api_test.rs`         | 7     | Yes         | Health, search, fuzzy, sync, sync force            |
 
 ---
 
@@ -441,6 +444,35 @@ Fuzzy search using `pg_trgm` + `unaccent`. Results ranked by similarity.
 
 ```bash
 curl "http://localhost:3000/api/v1/ruc/search?query=JUAN CARLOS LOPES&status=ACTIVO"
+```
+
+### `GET /api/v1/ruc/{ruc}/dv`
+
+Compute the check digit (dígito verificador) for a RUC number using the Módulo 11 algorithm.
+
+```bash
+curl http://localhost:3000/api/v1/ruc/1000100/dv
+# {"ruc":"1000100","check_digit":0,"full":"1000100-0"}
+
+curl http://localhost:3000/api/v1/ruc/80001001/dv
+# {"ruc":"80001001","check_digit":9,"full":"80001001-9"}
+```
+
+### `GET /api/v1/ruc/{ruc-dv}/validate`
+
+Validate whether a RUC-DV pair is correct. Accepts two formats:
+
+```bash
+# Hyphen-separated: /ruc/{ruc}-{dv}/validate
+curl http://localhost:3000/api/v1/ruc/1000100-0/validate
+# {"ruc":"1000100","check_digit":"0","valid":true}
+
+curl http://localhost:3000/api/v1/ruc/1000100-9/validate
+# {"ruc":"1000100","check_digit":"9","valid":false}
+
+# Split path: /ruc/{ruc}/validate/{dv}
+curl http://localhost:3000/api/v1/ruc/1000100/validate/0
+# {"ruc":"1000100","check_digit":"0","valid":true}
 ```
 
 ### `POST /api/v1/sync`
