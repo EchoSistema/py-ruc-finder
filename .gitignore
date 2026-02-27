@@ -10,3 +10,5 @@
 # Data (downloaded/generated)
 input/
 output/
+/.claude/CLAUDE.md
+/commit.message

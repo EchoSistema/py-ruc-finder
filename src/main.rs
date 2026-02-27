@@ -23,7 +23,7 @@ use crate::exporter::ExportFormat;
         title = "RUC Finder API",
         description = "REST API for querying RUC (Registro Unico de Contribuyentes) data from DNIT Paraguay.\n\nData is scraped from the official DNIT website, parsed from ZIP/TXT files, and stored in PostgreSQL. The API supports exact lookup, filtered search with pagination, and fuzzy (trigram similarity) search.\n\n**Data source:** [DNIT Paraguay — Listado de RUC con sus equivalencias](https://www.dnit.gov.py/web/portal-institucional/listado-de-ruc-con-sus-equivalencias)",
         version = "0.1.0",
-        contact(name = "Echosistema", url = "https://github.com/EwertonDaniel"),
+        contact(name = "GitHub Repository", url = "https://github.com/EchoSistema/py-ruc-finder"),
         license(name = "MIT")
     ),
     tags(

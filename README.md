@@ -450,8 +450,17 @@ Requests from IPs outside the allowed networks receive `403 Forbidden`:
 
 [DNIT Paraguay — Listado de RUC con sus equivalencias](https://www.dnit.gov.py/web/portal-institucional/listado-de-ruc-con-sus-equivalencias)
 
-10 ZIP files (`ruc0.zip` through `ruc9.zip`), each containing a TXT with the format:
+The scraper discovers all ZIP files linked on the DNIT page (typically named `ruc0.zip`, `ruc1.zip`, etc.). The number of files may vary as DNIT updates their publishing format. Each ZIP contains a TXT with pipe-delimited records:
 
 ```
 RUC|LAST_NAMES, FIRST_NAMES|CHECK_DIGIT|OLD_RUC|STATUS|
 ```
+
+## PostgreSQL setup
+
+The application requires specific PostgreSQL extensions and a custom function. See **[docs/database-setup.md](docs/database-setup.md)** for the full setup guide including:
+
+- Required extensions (`pg_trgm`, `unaccent`)
+- `immutable_unaccent()` wrapper function (needed for GIN indexes)
+- Table creation with partitioning by status
+- Performance indexes (GIN trigram)
