@@ -129,6 +129,18 @@ async fn main() {
                 web::get().to(handlers::fuzzy_search_ruc),
             )
             .route(
+                "/api/v1/ruc/{ruc}/dv",
+                web::get().to(handlers::compute_check_digit),
+            )
+            .route(
+                "/api/v1/ruc/{ruc_dv}/validate",
+                web::get().to(handlers::validate_ruc),
+            )
+            .route(
+                "/api/v1/ruc/{ruc}/validate/{dv}",
+                web::get().to(handlers::validate_ruc_split),
+            )
+            .route(
                 "/api/v1/ruc/{ruc}",
                 web::get().to(handlers::get_ruc_by_number),
             )

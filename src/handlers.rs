@@ -6,45 +6,23 @@ use sqlx::PgPool;
 
 use crate::config::AppConfig;
 use crate::errors::{AppError, ErrorResponse};
-use crate::models::{FuzzySearchParams, PaginatedResponse, Ruc, RucSearchParams, RucWithScore, SyncParams};
+use crate::models::{
+    CheckDigitResponse, FuzzySearchParams, PaginatedResponse, Ruc, RucSearchParams, RucWithScore,
+    SyncParams, ValidateRucResponse,
+};
 use crate::repository;
 use crate::scraper;
 
-/// Look up a RUC by its exact number.
+/// Get RUC by number.
 ///
-/// Returns a single RUC record matching the given number. You can optionally
-/// include the check digit separated by a hyphen (e.g. `1000000-3`).
-/// If a check digit is provided, it is also matched; otherwise only the
-/// RUC number is used for lookup.
-#[utoipa::path(
-    get,
-    path = "/api/v1/ruc/{ruc}",
-    tag = "RUC",
-    summary = "Get RUC by number",
-    description = "Look up a single RUC by its exact number. Optionally include the check digit separated by a hyphen (e.g. `1000000-3`). Returns 404 if not found.",
-    params(
-        ("ruc" = String, Path, description = "RUC number, optionally with check digit", example = "1000000-3")
-    ),
+/// Look up a single RUC by its exact number. Optionally include the check digit
+/// separated by a hyphen (e.g. `1000000-3`). Returns 404 if not found.
+#[utoipa::path(get, path = "/api/v1/ruc/{ruc}", tag = "RUC",
+    params(("ruc" = String, Path, description = "RUC number, optionally with check digit", example = "1000000-3")),
     responses(
-        (status = 200, description = "RUC found successfully", body = Ruc,
-            example = json!({
-                "id": 42,
-                "ruc": "1000000",
-                "first_names": "JUANA DEL CARMEN",
-                "last_names": "CAÑETE GONZALEZ",
-                "full_name": "JUANA DEL CARMEN CAÑETE GONZALEZ",
-                "check_digit": "3",
-                "old_ruc": "CAGJ761720E",
-                "status": "ACTIVO",
-                "created_at": "2026-02-01T00:00:00Z",
-                "updated_at": "2026-02-01T00:00:00Z",
-                "file_metadata_id": 1
-            })
-        ),
-        (status = 404, description = "RUC not found in the database", body = ErrorResponse,
-            example = json!({"error": "RUC 9999999 not found"})
-        ),
-        (status = 500, description = "Internal server error", body = ErrorResponse)
+        (status = 200, description = "RUC found", body = Ruc),
+        (status = 404, description = "RUC not found", body = ErrorResponse),
+        (status = 500, description = "Internal server error", body = ErrorResponse),
     )
 )]
 pub async fn get_ruc_by_number(
@@ -63,41 +41,16 @@ pub async fn get_ruc_by_number(
     }
 }
 
-/// Search RUCs with combinable filters.
+/// Search RUCs with filters.
 ///
-/// All text fields use accent-insensitive, case-insensitive partial matching
-/// (`unaccent() + ILIKE`). The `status` filter uses exact match, enabling
-/// PostgreSQL partition pruning for better performance. All filters are
-/// combined with AND logic. Results are paginated.
-#[utoipa::path(
-    get,
-    path = "/api/v1/ruc",
-    tag = "RUC",
-    summary = "Search RUCs with filters",
-    description = "Search RUC records using combinable filters. Text fields (name, first_names, last_names, full_name, ruc, old_ruc) use accent-insensitive, case-insensitive partial matching (`unaccent() + ILIKE`). The `status` field uses exact match for partition pruning. All filters are combined with AND logic. Results are paginated.",
+/// Search RUC records using combinable filters. Text fields use accent-insensitive,
+/// case-insensitive partial matching (`unaccent() + ILIKE`). The `status` field uses
+/// exact match for partition pruning. All filters are combined with AND logic.
+#[utoipa::path(get, path = "/api/v1/ruc", tag = "RUC",
     params(RucSearchParams),
     responses(
-        (status = 200, description = "Paginated list of matching RUCs", body = inline(PaginatedResponse<Ruc>),
-            example = json!({
-                "data": [{
-                    "id": 42,
-                    "ruc": "1000000",
-                    "first_names": "JUANA DEL CARMEN",
-                    "last_names": "CAÑETE GONZALEZ",
-                    "full_name": "JUANA DEL CARMEN CAÑETE GONZALEZ",
-                    "check_digit": "3",
-                    "old_ruc": "CAGJ761720E",
-                    "status": "ACTIVO",
-                    "created_at": "2026-02-01T00:00:00Z",
-                    "updated_at": "2026-02-01T00:00:00Z",
-                    "file_metadata_id": 1
-                }],
-                "page": 1,
-                "limit": 25,
-                "total": 1
-            })
-        ),
-        (status = 500, description = "Internal server error", body = ErrorResponse)
+        (status = 200, description = "Paginated results", body = inline(PaginatedResponse<Ruc>)),
+        (status = 500, description = "Internal server error", body = ErrorResponse),
     )
 )]
 pub async fn search_ruc(
@@ -107,19 +60,13 @@ pub async fn search_ruc(
 ) -> Result<HttpResponse, AppError> {
     let mut params = query.into_inner();
 
-    // If the ruc param contains a hyphen, split into ruc number + check_digit
-    // e.g. "80077182-6" → ruc="80077182", check_digit="6"
-    // A trailing hyphen (e.g. "80077182-") is stripped without setting check_digit.
+    // Split "80077182-6" → ruc="80077182", check_digit="6"
     let check_digit_filter = match params.ruc.take() {
         Some(ruc_val) => {
             if let Some((number, dv)) = ruc_val.split_once('-') {
                 let dv = dv.trim();
                 params.ruc = Some(number.to_string());
-                if dv.is_empty() {
-                    None
-                } else {
-                    Some(dv.to_string())
-                }
+                if dv.is_empty() { None } else { Some(dv.to_string()) }
             } else {
                 params.ruc = Some(ruc_val);
                 None
@@ -140,50 +87,19 @@ pub async fn search_ruc(
         .limit
         .unwrap_or(config.pagination_limit)
         .clamp(1, config.pagination_max);
-    Ok(HttpResponse::Ok().json(PaginatedResponse {
-        data,
-        page,
-        limit,
-        total,
-    }))
+    Ok(HttpResponse::Ok().json(PaginatedResponse { data, page, limit, total }))
 }
 
-/// Fuzzy search RUCs by name similarity.
+/// Fuzzy search RUCs by name.
 ///
-/// Uses PostgreSQL `pg_trgm` trigram similarity with `unaccent()` for
-/// accent-insensitive fuzzy matching against `full_name`. Results are
-/// ranked by similarity score (highest first). Useful for finding
-/// taxpayers when the exact spelling is unknown.
-#[utoipa::path(
-    get,
-    path = "/api/v1/ruc/search",
-    tag = "RUC",
-    summary = "Fuzzy search RUCs by name",
-    description = "Fuzzy search using PostgreSQL `pg_trgm` trigram similarity with `unaccent()`. Matches the `query` against `full_name` and returns paginated results ranked by similarity score (highest first). Useful when the exact name spelling is unknown. The `status` filter enables partition pruning.",
+/// Fuzzy search using PostgreSQL `pg_trgm` trigram similarity with `unaccent()`.
+/// Matches `query` against `full_name` and returns results ranked by similarity
+/// score (highest first). The `status` filter enables partition pruning.
+#[utoipa::path(get, path = "/api/v1/ruc/search", tag = "RUC",
     params(FuzzySearchParams),
     responses(
-        (status = 200, description = "Paginated list of matching RUCs with similarity scores, ordered by relevance", body = inline(PaginatedResponse<RucWithScore>),
-            example = json!({
-                "data": [{
-                    "id": 42,
-                    "ruc": "1000000",
-                    "first_names": "JUAN CARLOS",
-                    "last_names": "LOPEZ MARTINEZ",
-                    "full_name": "JUAN CARLOS LOPEZ MARTINEZ",
-                    "check_digit": "7",
-                    "old_ruc": "LMJC800101A",
-                    "status": "ACTIVO",
-                    "created_at": "2026-02-01T00:00:00Z",
-                    "updated_at": "2026-02-01T00:00:00Z",
-                    "file_metadata_id": 1,
-                    "score": 0.72
-                }],
-                "page": 1,
-                "limit": 25,
-                "total": 1
-            })
-        ),
-        (status = 500, description = "Internal server error", body = ErrorResponse)
+        (status = 200, description = "Paginated results with similarity scores", body = inline(PaginatedResponse<RucWithScore>)),
+        (status = 500, description = "Internal server error", body = ErrorResponse),
     )
 )]
 pub async fn fuzzy_search_ruc(
@@ -198,31 +114,17 @@ pub async fn fuzzy_search_ruc(
         .limit
         .unwrap_or(config.fuzzy_limit)
         .clamp(1, config.fuzzy_max);
-    Ok(HttpResponse::Ok().json(PaginatedResponse {
-        data,
-        page,
-        limit,
-        total,
-    }))
+    Ok(HttpResponse::Ok().json(PaginatedResponse { data, page, limit, total }))
 }
 
-/// Health check endpoint.
+/// Health check.
 ///
-/// Verifies that the API server is running and the PostgreSQL database
-/// connection is responsive by executing a simple `SELECT 1` query.
-#[utoipa::path(
-    get,
-    path = "/api/v1/health",
-    tag = "System",
-    summary = "Health check",
-    description = "Verifies that the API server is running and the PostgreSQL database connection is responsive. Returns `{\"status\": \"ok\"}` on success, or 500 if the database is unreachable.",
+/// Verifies that the API server is running and the database connection is responsive.
+#[utoipa::path(get, path = "/api/v1/health", tag = "System",
     responses(
-        (status = 200, description = "Service and database are healthy", body = serde_json::Value,
-            example = json!({"status": "ok"})
-        ),
-        (status = 500, description = "Database connection failed", body = ErrorResponse,
-            example = json!({"error": "Database error: connection refused"})
-        )
+        (status = 200, description = "Healthy", body = serde_json::Value,
+            example = json!({"status": "ok"})),
+        (status = 500, description = "Database unreachable", body = ErrorResponse),
     )
 )]
 pub async fn health_check(pool: web::Data<PgPool>) -> Result<HttpResponse, AppError> {
@@ -232,36 +134,23 @@ pub async fn health_check(pool: web::Data<PgPool>) -> Result<HttpResponse, AppEr
     Ok(HttpResponse::Ok().json(serde_json::json!({ "status": "ok" })))
 }
 
-/// Trigger a data sync from DNIT Paraguay.
+/// Trigger data sync from DNIT.
 ///
-/// Starts a background task that scrapes the DNIT website for new RUC ZIP
-/// files, downloads them, parses the contents, and upserts records into the
-/// database. Returns immediately with `202 Accepted`.
+/// Starts a background scraper that downloads RUC ZIP files from DNIT Paraguay,
+/// parses the contents, and upserts records. Returns 202 immediately.
 ///
-/// **Access control:** restricted to IPs within the CIDR networks configured
-/// in `sync.allowed_networks`. Returns `403 Forbidden` if the caller's IP
-/// is outside the allowed range. If no networks are configured, the endpoint
-/// is open to all.
-#[utoipa::path(
-    post,
-    path = "/api/v1/sync",
-    tag = "System",
-    summary = "Trigger data sync from DNIT",
-    description = "Starts a background scraper task that downloads RUC ZIP files from DNIT Paraguay, parses the contents, and upserts records into the database. Returns immediately with 202 Accepted.\n\n**Access control:** restricted to IPs within the CIDR networks configured in `sync.allowed_networks` (e.g. `10.10.0.0/20`). Returns 403 if the caller's IP is outside the allowed range. If no networks are configured, the endpoint is open to all.\n\n**Rate limit:** respects `sync.interval_hours`. If a sync was performed recently, returns 429 Too Many Requests.\n\n**Force mode:** append `?force=true` to bypass the rate limit and the reference-date/hash checks inside the scraper.",
-    params(
-        ("force" = Option<bool>, Query, description = "Bypass interval and date/hash checks")
-    ),
+/// **Access control:** restricted to `sync.allowed_networks` CIDRs.
+/// **Rate limit:** respects `sync.interval_hours` (skipped with `?force=true`).
+/// **Force mode:** `?force=true` bypasses rate limit and date/hash checks.
+#[utoipa::path(post, path = "/api/v1/sync", tag = "System",
+    params(("force" = Option<bool>, Query, description = "Bypass interval and date/hash checks")),
     responses(
-        (status = 202, description = "Sync started successfully in background", body = serde_json::Value,
-            example = json!({"message": "Sync started in background"})
-        ),
-        (status = 403, description = "Forbidden - caller IP not in allowed network", body = ErrorResponse,
-            example = json!({"error": "Sync endpoint is restricted to the internal network"})
-        ),
-        (status = 429, description = "Sync was performed recently", body = serde_json::Value,
-            example = json!({"error": "Last sync was 2h ago. Minimum interval is 24h."})
-        ),
-        (status = 500, description = "Internal server error", body = ErrorResponse)
+        (status = 202, description = "Sync started", body = serde_json::Value,
+            example = json!({"message": "Sync started in background"})),
+        (status = 403, description = "Forbidden", body = ErrorResponse),
+        (status = 429, description = "Too recent", body = serde_json::Value,
+            example = json!({"error": "Last sync was 2h ago. Minimum interval is 24h."})),
+        (status = 500, description = "Internal server error", body = ErrorResponse),
     )
 )]
 pub async fn trigger_sync(
@@ -272,7 +161,6 @@ pub async fn trigger_sync(
 ) -> Result<HttpResponse, AppError> {
     let force = query.force.unwrap_or(false);
 
-    // Network restriction: check caller IP against allowed CIDRs
     if !config.sync_allowed_networks.is_empty() {
         let peer = req.peer_addr().ok_or_else(|| {
             AppError::Internal("Unable to determine client IP address".to_string())
@@ -284,7 +172,6 @@ pub async fn trigger_sync(
         }
     }
 
-    // Rate limit: enforce sync_interval_hours (skipped when force=true)
     if !force {
         if let Some(last_sync) = repository::get_last_sync_time(pool.get_ref()).await? {
             let hours_since = (Utc::now() - last_sync).num_hours();
@@ -305,12 +192,96 @@ pub async fn trigger_sync(
         scraper::run_sync_db(&pool_clone, &config_clone, force).await;
     });
 
-    let message = if force {
-        "Forced sync started in background"
-    } else {
-        "Sync started in background"
-    };
-    Ok(HttpResponse::Accepted().json(serde_json::json!({
-        "message": message
-    })))
+    let message = if force { "Forced sync started in background" } else { "Sync started in background" };
+    Ok(HttpResponse::Accepted().json(serde_json::json!({ "message": message })))
+}
+
+/// Compute check digit for a RUC.
+///
+/// Computes the dígito verificador using the Módulo 11 algorithm (DNIT Paraguay).
+#[utoipa::path(get, path = "/api/v1/ruc/{ruc}/dv", tag = "RUC",
+    params(("ruc" = String, Path, description = "RUC number (without check digit)", example = "1000100")),
+    responses(
+        (status = 200, description = "Check digit computed", body = CheckDigitResponse),
+        (status = 400, description = "Invalid RUC format", body = ErrorResponse),
+    )
+)]
+pub async fn compute_check_digit(
+    path: web::Path<String>,
+) -> Result<HttpResponse, AppError> {
+    let ruc = path.into_inner();
+    require_alphanumeric(&ruc)?;
+    let dv = crate::models::compute_check_digit(&ruc);
+    Ok(HttpResponse::Ok().json(CheckDigitResponse {
+        full: format!("{ruc}-{dv}"),
+        ruc,
+        check_digit: dv,
+    }))
+}
+
+/// Validate a RUC check digit.
+///
+/// Validates whether the check digit matches the Módulo 11 computation.
+///
+/// Accepts: `/api/v1/ruc/1000100-0/validate` (hyphen) or
+/// `/api/v1/ruc/1000100/validate/0` (split path).
+#[utoipa::path(get, path = "/api/v1/ruc/{ruc_dv}/validate", tag = "RUC",
+    params(("ruc_dv" = String, Path, description = "RUC-DV (e.g. `1000100-0`)", example = "1000100-0")),
+    responses(
+        (status = 200, description = "Validation result", body = ValidateRucResponse),
+        (status = 400, description = "Invalid format", body = ErrorResponse),
+    )
+)]
+pub async fn validate_ruc(
+    path: web::Path<String>,
+) -> Result<HttpResponse, AppError> {
+    let raw = path.into_inner();
+    let (ruc, dv) = parse_ruc_dv(&raw)?;
+    do_validate_ruc(&ruc, &dv)
+}
+
+/// Alternative validate route: `/api/v1/ruc/{ruc}/validate/{dv}`
+pub async fn validate_ruc_split(
+    path: web::Path<(String, String)>,
+) -> Result<HttpResponse, AppError> {
+    let (ruc, dv) = path.into_inner();
+    do_validate_ruc(&ruc, &dv)
+}
+
+// ---------------------------------------------------------------------------
+// Private helpers
+// ---------------------------------------------------------------------------
+
+fn require_alphanumeric(ruc: &str) -> Result<(), AppError> {
+    if ruc.is_empty() || !ruc.chars().all(|c| c.is_alphanumeric()) {
+        return Err(AppError::BadRequest(
+            "RUC must be a non-empty alphanumeric string".to_string(),
+        ));
+    }
+    Ok(())
+}
+
+fn do_validate_ruc(ruc: &str, dv: &str) -> Result<HttpResponse, AppError> {
+    require_alphanumeric(ruc)?;
+    let valid = crate::models::validate_ruc(ruc, dv);
+    Ok(HttpResponse::Ok().json(ValidateRucResponse {
+        ruc: ruc.to_string(),
+        check_digit: dv.to_string(),
+        valid,
+    }))
+}
+
+fn parse_ruc_dv(input: &str) -> Result<(String, String), AppError> {
+    let (ruc, dv) = input.split_once('-').ok_or_else(|| {
+        AppError::BadRequest(
+            "Expected format RUC-DV (e.g. 1000100-0). Use /ruc/{ruc}/validate/{dv} for separate segments.".to_string(),
+        )
+    })?;
+    require_alphanumeric(ruc)?;
+    if dv.is_empty() {
+        return Err(AppError::BadRequest(
+            "Check digit is required (e.g. 1000100-0)".to_string(),
+        ));
+    }
+    Ok((ruc.to_string(), dv.to_string()))
 }

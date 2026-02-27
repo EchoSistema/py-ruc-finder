@@ -17,6 +17,7 @@ pub struct ErrorResponse {
 #[derive(Debug)]
 pub enum AppError {
     Db(sqlx::Error),
+    BadRequest(String),
     NotFound(String),
     Forbidden(String),
     Internal(String),
@@ -26,6 +27,7 @@ impl fmt::Display for AppError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             AppError::Db(e) => write!(f, "Database error: {e}"),
+            AppError::BadRequest(msg) => write!(f, "Bad request: {msg}"),
             AppError::NotFound(msg) => write!(f, "Not found: {msg}"),
             AppError::Forbidden(msg) => write!(f, "Forbidden: {msg}"),
             AppError::Internal(msg) => write!(f, "Internal error: {msg}"),
@@ -41,6 +43,9 @@ impl ResponseError for AppError {
                     "error": self.to_string()
                 }))
             }
+            AppError::BadRequest(msg) => HttpResponse::BadRequest().json(serde_json::json!({
+                "error": msg
+            })),
             AppError::NotFound(msg) => HttpResponse::NotFound().json(serde_json::json!({
                 "error": msg
             })),

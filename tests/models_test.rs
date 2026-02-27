@@ -1,4 +1,4 @@
-use ruc_finder::models::{PaginatedResponse, SyncParams};
+use ruc_finder::models::{PaginatedResponse, SyncParams, compute_check_digit, validate_ruc};
 
 // ---------------------------------------------------------------------------
 // PaginatedResponse serialization
@@ -108,4 +108,147 @@ fn fuzzy_search_params_with_all_fields() {
     assert!((params.threshold.unwrap() - 0.5).abs() < f64::EPSILON);
     assert_eq!(params.page, Some(1));
     assert_eq!(params.limit, Some(10));
+}
+
+// ---------------------------------------------------------------------------
+// compute_check_digit — ruc0.txt (ACTIVO personas físicas)
+// ---------------------------------------------------------------------------
+
+#[test]
+fn check_digit_skywalker_luke() {
+    // 1000100|SKYWALKER, LUKE|0|...
+    assert_eq!(compute_check_digit("1000100"), 0);
+}
+
+#[test]
+fn check_digit_organa_leia() {
+    // 1000200|ORGANA, LEIA|6|...
+    assert_eq!(compute_check_digit("1000200"), 6);
+}
+
+#[test]
+fn check_digit_solo_han() {
+    // 1000300|SOLO, HAN|2|...
+    assert_eq!(compute_check_digit("1000300"), 2);
+}
+
+#[test]
+fn check_digit_kenobi_obi_wan() {
+    // 1000400|KENOBI, OBI WAN|9|...
+    assert_eq!(compute_check_digit("1000400"), 9);
+}
+
+#[test]
+fn check_digit_calrissian_lando() {
+    // 1000500|CALRISSIAN, LANDO|5|...
+    assert_eq!(compute_check_digit("1000500"), 5);
+}
+
+// ---------------------------------------------------------------------------
+// compute_check_digit — ruc1.txt (mixed statuses)
+// ---------------------------------------------------------------------------
+
+#[test]
+fn check_digit_vader_darth() {
+    // 2000100|VADER, DARTH|2|...
+    assert_eq!(compute_check_digit("2000100"), 2);
+}
+
+#[test]
+fn check_digit_palpatine_sheev() {
+    // 2000200|PALPATINE, SHEEV|9|...
+    assert_eq!(compute_check_digit("2000200"), 9);
+}
+
+#[test]
+fn check_digit_maul_darth() {
+    // 2000300|MAUL, DARTH|5|...
+    assert_eq!(compute_check_digit("2000300"), 5);
+}
+
+#[test]
+fn check_digit_dooku_conde() {
+    // 2000400|DOOKU, CONDE|1|...
+    assert_eq!(compute_check_digit("2000400"), 1);
+}
+
+#[test]
+fn check_digit_fett_boba() {
+    // 2000500|FETT, BOBA|8|...
+    assert_eq!(compute_check_digit("2000500"), 8);
+}
+
+// ---------------------------------------------------------------------------
+// compute_check_digit — ruc2.txt (jurídicas)
+// ---------------------------------------------------------------------------
+
+#[test]
+fn check_digit_alianza_rebelde() {
+    // 80001001|ALIANZA REBELDE S.A.|9|...
+    assert_eq!(compute_check_digit("80001001"), 9);
+}
+
+#[test]
+fn check_digit_imperio_galactico() {
+    // 80002001|IMPERIO GALACTICO S.R.L.|4|...
+    assert_eq!(compute_check_digit("80002001"), 4);
+}
+
+#[test]
+fn check_digit_orden_jedi() {
+    // 80003001|ORDEN JEDI LTDA.|0|...
+    assert_eq!(compute_check_digit("80003001"), 0);
+}
+
+#[test]
+fn check_digit_federacion_comercio() {
+    // 80004001|FEDERACION DE COMERCIO S.A.|5|...
+    assert_eq!(compute_check_digit("80004001"), 5);
+}
+
+#[test]
+fn check_digit_mandalorian_security() {
+    // 80005001|MANDALORIAN SECURITY S.A.|0|...
+    assert_eq!(compute_check_digit("80005001"), 0);
+}
+
+// ---------------------------------------------------------------------------
+// validate_ruc — valid pairs from all datasets
+// ---------------------------------------------------------------------------
+
+#[test]
+fn validate_ruc_valid_pairs() {
+    // All 15 entries from the Star Wars test datasets
+    let valid_pairs = [
+        ("1000100", "0"), ("1000200", "6"), ("1000300", "2"),
+        ("1000400", "9"), ("1000500", "5"), ("2000100", "2"),
+        ("2000200", "9"), ("2000300", "5"), ("2000400", "1"),
+        ("2000500", "8"), ("80001001", "9"), ("80002001", "4"),
+        ("80003001", "0"), ("80004001", "5"), ("80005001", "0"),
+    ];
+    for (ruc, dv) in valid_pairs {
+        assert!(validate_ruc(ruc, dv), "Expected {ruc}-{dv} to be valid");
+    }
+}
+
+#[test]
+fn validate_ruc_invalid_check_digit() {
+    // Correct DV for 1000100 is 0, so 1 should fail
+    assert!(!validate_ruc("1000100", "1"));
+    assert!(!validate_ruc("1000100", "9"));
+    assert!(!validate_ruc("80001001", "3"));
+}
+
+#[test]
+fn validate_ruc_non_numeric_dv() {
+    assert!(!validate_ruc("1000100", "X"));
+    assert!(!validate_ruc("1000100", ""));
+    assert!(!validate_ruc("1000100", "abc"));
+}
+
+#[test]
+fn validate_ruc_whitespace_dv_trimmed() {
+    // validate_ruc trims whitespace before parsing
+    assert!(validate_ruc("1000100", " 0 "));
+    assert!(validate_ruc("2000100", "  2\t"));
 }

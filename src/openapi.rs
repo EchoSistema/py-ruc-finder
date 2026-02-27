@@ -22,11 +22,15 @@ use crate::models;
         handlers::get_ruc_by_number,
         handlers::search_ruc,
         handlers::fuzzy_search_ruc,
+        handlers::compute_check_digit,
+        handlers::validate_ruc,
         handlers::trigger_sync,
     ),
     components(schemas(
         models::Ruc,
         models::RucWithScore,
+        models::CheckDigitResponse,
+        models::ValidateRucResponse,
         errors::ErrorResponse,
     ))
 )]

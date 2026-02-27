@@ -219,3 +219,63 @@ pub struct ParsedRuc {
     pub old_ruc: String,
     pub status: String,
 }
+
+/// Computes the check digit (dígito verificador) for a Paraguayan RUC number.
+/// Uses the Módulo 11 algorithm as defined by DNIT.
+pub fn compute_check_digit(ruc: &str) -> u8 {
+    let mut total: u32 = 0;
+    let mut k: u32 = 2;
+    for ch in ruc.chars().rev() {
+        let val = if ch.is_ascii_digit() {
+            ch as u32 - '0' as u32
+        } else {
+            ch.to_ascii_uppercase() as u32
+        };
+        total += val * k;
+        k += 1;
+        if k > 11 {
+            k = 2;
+        }
+    }
+    let remainder = total % 11;
+    if remainder > 1 { (11 - remainder) as u8 } else { 0 }
+}
+
+/// Validates that a RUC-DV pair is correct.
+/// Returns true if the check digit matches the computed one.
+pub fn validate_ruc(ruc: &str, check_digit: &str) -> bool {
+    let Ok(dv) = check_digit.trim().parse::<u8>() else {
+        return false;
+    };
+    compute_check_digit(ruc) == dv
+}
+
+/// Response for the check digit computation endpoint.
+#[derive(Debug, Serialize, ToSchema)]
+#[schema(example = json!({"ruc": "1000100", "check_digit": 0, "full": "1000100-0"}))]
+pub struct CheckDigitResponse {
+    /// The RUC number.
+    #[schema(example = "1000100")]
+    pub ruc: String,
+    /// Computed check digit (0–10).
+    #[schema(example = 0)]
+    pub check_digit: u8,
+    /// Full RUC-DV string (e.g. "1000100-0").
+    #[schema(example = "1000100-0")]
+    pub full: String,
+}
+
+/// Response for the RUC validation endpoint.
+#[derive(Debug, Serialize, ToSchema)]
+#[schema(example = json!({"ruc": "1000100", "check_digit": "0", "valid": true}))]
+pub struct ValidateRucResponse {
+    /// The RUC number.
+    #[schema(example = "1000100")]
+    pub ruc: String,
+    /// The check digit that was validated.
+    #[schema(example = "0")]
+    pub check_digit: String,
+    /// Whether the check digit is valid.
+    #[schema(example = true)]
+    pub valid: bool,
+}

@@ -23,9 +23,22 @@ fn app_error_display_internal() {
     assert_eq!(err.to_string(), "Internal error: something broke");
 }
 
+#[test]
+fn app_error_display_bad_request() {
+    let err = AppError::BadRequest("invalid input".to_string());
+    assert_eq!(err.to_string(), "Bad request: invalid input");
+}
+
 // ---------------------------------------------------------------------------
 // AppError HTTP status codes
 // ---------------------------------------------------------------------------
+
+#[test]
+fn app_error_bad_request_returns_400() {
+    let err = AppError::BadRequest("bad".to_string());
+    let resp = err.error_response();
+    assert_eq!(resp.status(), 400);
+}
 
 #[test]
 fn app_error_not_found_returns_404() {

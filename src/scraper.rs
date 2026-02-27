@@ -485,7 +485,13 @@ fn parse_line(line: &str) -> Option<ParsedRuc> {
     let old_ruc = parts[parts.len() - 2].trim().to_string();
     let check_digit = parts[parts.len() - 3].trim().to_string();
 
-    let raw_name = parts[1..parts.len() - 3].join("|");
+    // Join the name parts, filtering out empty segments from stray double pipes.
+    let raw_name: String = parts[1..parts.len() - 3]
+        .iter()
+        .filter(|p| !p.is_empty())
+        .copied()
+        .collect::<Vec<_>>()
+        .join("|");
     let raw_name = raw_name.trim();
 
     let (last_names, first_names) = match raw_name.find(',') {
@@ -514,6 +520,7 @@ fn parse_line(line: &str) -> Option<ParsedRuc> {
         status,
     })
 }
+
 
 #[cfg(test)]
 mod tests {
@@ -666,4 +673,17 @@ mod tests {
         assert_eq!(parsed.last_names, "MONTIEL  ORTIZ");
         assert_eq!(parsed.first_names, "CANCIO");
     }
+
+    #[test]
+    fn test_parse_line_double_pipe() {
+        let line = "80101536|PALMAS & SOL S.A.||7|PSSA1777007|SUSPENSION TEMPORAL|";
+        let parsed = parse_line(line).unwrap();
+        assert_eq!(parsed.ruc, "80101536");
+        assert_eq!(parsed.first_names, "PALMAS & SOL S.A.");
+        assert_eq!(parsed.last_names, "");
+        assert_eq!(parsed.check_digit, "7");
+        assert_eq!(parsed.old_ruc, "PSSA1777007");
+        assert_eq!(parsed.status, "SUSPENSION TEMPORAL");
+    }
+
 }
