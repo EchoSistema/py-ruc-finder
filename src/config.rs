@@ -36,6 +36,8 @@ struct FileConfig {
     paths: PathsSection,
     #[serde(default)]
     search: SearchSection,
+    #[serde(default)]
+    footprint: FootprintSection,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -62,6 +64,12 @@ struct SyncSection {
 struct PathsSection {
     download_dir: Option<String>,
     output_dir: Option<String>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct FootprintSection {
+    api_base_url: Option<String>,
+    public_key: Option<String>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -95,6 +103,11 @@ pub struct AppConfig {
     /// CIDR networks allowed to call POST /api/v1/sync.
     /// Empty = no restriction (allow all).
     pub sync_allowed_networks: Vec<CidrNetwork>,
+    /// Footprint tracking base URL (e.g. `https://echosistema.dev`).
+    /// When both base_url and public_key are set, tracking is enabled.
+    pub footprint_api_base_url: Option<String>,
+    /// Footprint tracking public key (sent as X-PUBLIC-KEY header).
+    pub footprint_public_key: Option<String>,
 }
 
 /// Parsed CIDR network (e.g. 10.116.0.0/20).
@@ -213,6 +226,12 @@ impl AppConfig {
                 env::var("SYNC_ALLOWED_NETWORKS").ok().as_deref(),
                 file.sync.allowed_networks.as_deref(),
             ),
+            footprint_api_base_url: env::var("API_BASE_URL")
+                .ok()
+                .or(file.footprint.api_base_url),
+            footprint_public_key: env::var("PWS_PUBLIC_KEY")
+                .ok()
+                .or(file.footprint.public_key),
         }
     }
 

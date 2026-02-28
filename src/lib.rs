@@ -2,6 +2,7 @@ pub mod config;
 pub mod db;
 pub mod errors;
 pub mod exporter;
+pub mod footprint;
 pub mod handlers;
 pub mod models;
 pub mod openapi;

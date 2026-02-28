@@ -1,12 +1,12 @@
 [package]
 name = "ruc_finder"
-version = "0.1.5"
+version = "0.1.6"
 edition = "2024"
 
 [dependencies]
 tokio = { version = "1", features = ["full"] }
 sqlx = { version = "0.8", features = ["runtime-tokio", "tls-rustls", "postgres", "chrono"] }
-reqwest = { version = "0.12", features = ["rustls-tls"] }
+reqwest = { version = "0.12", features = ["rustls-tls", "json"] }
 zip = "2"
 chrono = { version = "0.4", features = ["serde"] }
 actix-web = "4"
@@ -22,3 +22,4 @@ arrow = "54"
 parquet = "54"
 utoipa = { version = "5", features = ["actix_extras", "chrono"] }
 utoipa-swagger-ui = { version = "9", features = ["actix-web"] }
+sha2 = "0.10"

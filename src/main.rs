@@ -9,6 +9,7 @@ use utoipa_swagger_ui::SwaggerUi;
 use ruc_finder::config;
 use ruc_finder::db;
 use ruc_finder::exporter::ExportFormat;
+use ruc_finder::footprint::{FootprintMiddleware, FootprintService};
 use ruc_finder::handlers;
 use ruc_finder::openapi::ApiDoc;
 use ruc_finder::scraper;
@@ -109,12 +110,27 @@ async fn main() {
     let bind_addr = format!("{}:{}", config.host, config.port);
     info!("Starting server on {bind_addr}...");
     let pool_data = web::Data::new(pool);
+
+    // Bootstrap footprint tracking (auto-enabled when both URL and key are set)
+    let footprint_svc: Option<Arc<FootprintService>> =
+        match (&config.footprint_api_base_url, &config.footprint_public_key) {
+            (Some(base_url), Some(key)) => {
+                info!("Footprint tracking enabled → {base_url}");
+                Some(Arc::new(FootprintService::new(
+                    base_url.clone(),
+                    key.clone(),
+                )))
+            }
+            _ => None,
+        };
+
     let config_data = web::Data::new(Arc::new(config));
     let openapi = ApiDoc::openapi();
     HttpServer::new(move || {
         App::new()
             .app_data(pool_data.clone())
             .app_data(config_data.clone())
+            .wrap(FootprintMiddleware { service: footprint_svc.clone() })
             .service(
                 SwaggerUi::new("/swagger-ui/{_:.*}").url("/api-docs/openapi.json", openapi.clone()),
             )
