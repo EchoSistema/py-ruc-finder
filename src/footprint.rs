@@ -19,6 +19,7 @@ pub struct FootprintService {
 struct FootprintPayload {
     session_id: String,
     event: &'static str,
+    page_title: &'static str,
     page_url: String,
     event_time: String,
     referer: String,
@@ -47,6 +48,7 @@ impl FootprintService {
         self: &Arc<Self>,
         session_id: String,
         event: &'static str,
+        page_title: &'static str,
         page_url: String,
         referer: String,
         url_params: Option<serde_json::Value>,
@@ -56,6 +58,7 @@ impl FootprintService {
         let payload = FootprintPayload {
             session_id,
             event,
+            page_title,
             page_url,
             referer,
             event_time: chrono::Utc::now().to_rfc3339(),
@@ -115,14 +118,14 @@ fn session_id_from_ip(ip: &str) -> String {
 }
 
 /// Resolve event type and url_params from the request path and query string.
-fn resolve_event(path: &str, query: &str) -> Option<(&'static str, String, Option<serde_json::Value>)> {
+fn resolve_event(path: &str, query: &str) -> Option<(&'static str, &'static str, String, Option<serde_json::Value>)> {
     // Swagger UI
     if path.starts_with("/swagger-ui") {
-        return Some(("page_view", "/swagger-ui/".to_string(), None));
+        return Some(("page_view", "Swagger Ui", "/swagger-ui/".to_string(), None));
     }
     // OpenAPI JSON
     if path == "/api-docs/openapi.json" {
-        return Some(("page_view", "/api-docs/openapi.json".to_string(), None));
+        return Some(("page_view", "Api Docs Openapi", "/api-docs/openapi.json".to_string(), None));
     }
 
     // API endpoints under /api/v1/ruc
@@ -133,7 +136,7 @@ fn resolve_event(path: &str, query: &str) -> Option<(&'static str, String, Optio
     // GET /api/v1/ruc/search — fuzzy search
     if path == "/api/v1/ruc/search" {
         let params = query_string_to_value(query);
-        return Some(("view_search_results", path.to_string(), Some(params)));
+        return Some(("view_search_results", "Ruc Search", path.to_string(), Some(params)));
     }
 
     // GET /api/v1/ruc/{ruc}/dv
@@ -141,7 +144,7 @@ fn resolve_event(path: &str, query: &str) -> Option<(&'static str, String, Optio
         && !ruc.contains('/')
     {
         let params = serde_json::json!({ "ruc": ruc });
-        return Some(("page_view", path.to_string(), Some(params)));
+        return Some(("page_view", "Ruc Dv", path.to_string(), Some(params)));
     }
 
     // GET /api/v1/ruc/{ruc}/validate/{dv}
@@ -151,10 +154,11 @@ fn resolve_event(path: &str, query: &str) -> Option<(&'static str, String, Optio
     {
         let dv = tail.strip_prefix('/').unwrap_or("");
         let mut params = serde_json::json!({ "ruc": ruc });
+        let title = if dv.is_empty() { "Ruc Dv Validate" } else { "Ruc Validate Dv" };
         if !dv.is_empty() {
             params["dv"] = serde_json::Value::String(dv.to_string());
         }
-        return Some(("page_view", path.to_string(), Some(params)));
+        return Some(("page_view", title, path.to_string(), Some(params)));
     }
 
     // GET /api/v1/ruc/{ruc} — single RUC lookup
@@ -163,13 +167,13 @@ fn resolve_event(path: &str, query: &str) -> Option<(&'static str, String, Optio
         && !ruc.contains('/')
     {
         let params = serde_json::json!({ "ruc": ruc });
-        return Some(("page_view", path.to_string(), Some(params)));
+        return Some(("page_view", "Ruc Number", path.to_string(), Some(params)));
     }
 
     // GET /api/v1/ruc — search with filters
     if path == "/api/v1/ruc" {
         let params = query_string_to_value(query);
-        return Some(("view_search_results", path.to_string(), Some(params)));
+        return Some(("view_search_results", "Ruc", path.to_string(), Some(params)));
     }
 
     None
@@ -243,7 +247,7 @@ where
                 .map(|addr| addr.ip().to_string())
                 .unwrap_or_default();
 
-            if let Some((event, page_url, url_params)) = resolve_event(&path, &query) {
+            if let Some((event, page_title, page_url, url_params)) = resolve_event(&path, &query) {
                 let session_id = session_id_from_ip(&ip);
                 let referer = if query.is_empty() {
                     path.clone()
@@ -256,7 +260,7 @@ where
                     .and_then(|v| v.to_str().ok())
                     .map(|s| parse_primary_language(s))
                     .unwrap_or_else(|| "es-PY".to_string());
-                svc.track(session_id, event, page_url, referer, url_params, Some(language));
+                svc.track(session_id, event, page_title, page_url, referer, url_params, Some(language));
             }
         }
 
