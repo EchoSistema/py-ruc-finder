@@ -19,7 +19,7 @@ pub struct FootprintService {
 struct FootprintPayload {
     session_id: String,
     event: &'static str,
-    page_title: &'static str,
+    title: &'static str,
     page_url: String,
     event_time: String,
     referer: String,
@@ -48,7 +48,7 @@ impl FootprintService {
         self: &Arc<Self>,
         session_id: String,
         event: &'static str,
-        page_title: &'static str,
+        title: &'static str,
         page_url: String,
         referer: String,
         url_params: Option<serde_json::Value>,
@@ -58,7 +58,7 @@ impl FootprintService {
         let payload = FootprintPayload {
             session_id,
             event,
-            page_title,
+            title,
             page_url,
             referer,
             event_time: chrono::Utc::now().to_rfc3339(),
@@ -247,7 +247,7 @@ where
                 .map(|addr| addr.ip().to_string())
                 .unwrap_or_default();
 
-            if let Some((event, page_title, page_url, url_params)) = resolve_event(&path, &query) {
+            if let Some((event, title, page_url, url_params)) = resolve_event(&path, &query) {
                 let session_id = session_id_from_ip(&ip);
                 let referer = if query.is_empty() {
                     path.clone()
@@ -260,7 +260,7 @@ where
                     .and_then(|v| v.to_str().ok())
                     .map(|s| parse_primary_language(s))
                     .unwrap_or_else(|| "es-PY".to_string());
-                svc.track(session_id, event, page_title, page_url, referer, url_params, Some(language));
+                svc.track(session_id, event, title, page_url, referer, url_params, Some(language));
             }
         }
 
